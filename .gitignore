@@ -1,0 +1,96 @@
+# ------------------------------
+# Unity standard ignores
+# ------------------------------
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+UserSettings/
+MemoryCaptures/
+*.pidb
+*.suo
+*.user
+*.userprefs
+*.csproj
+*.unityproj
+*.sln
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.DS_Store
+.DS_Store
+*.apk
+*.aab
+*.xcworkspace
+.vscode/
+.idea/
+*.cbp
+
+# Unity generated lighting, meta cache, etc.
+LightmapSnapshot/
+LightingData.asset
+*.lighting
+*.bak
+
+# Ignore Unity meta files for ignored assets
+*.meta
+
+# ------------------------------
+# Ignore large or external data
+# ------------------------------
+
+# Terrain / heightmaps / CSVs
+*.csv
+
+# CAD and model files (too large for Git)
+*.fbx
+*.obj
+*.dae
+*.stl
+*.blend
+*.max
+*.3ds
+
+# ------------------------------
+# Keep only key project content
+# ------------------------------
+
+# But force-keep these important directories and files
+!Assets/
+!Assets/Scripts/**
+!Assets/Scenes/**
+!Assets/config/**
+!Assets/Settings/**
+!Assets/ML-Agents/**
+!Assets/Resources/**
+
+# Optionally keep only certain types in those folders
+!Assets/**/*.cs
+!Assets/**/*.unity
+!Assets/**/*.json
+!Assets/**/*.asset
+!Assets/**/*.py
+
+# ------------------------------
+# Ignore research / output data
+# ------------------------------
+Assets/results/
+Assets/Demonstrations/
+Assets/Terrains/
+Assets/Moon Terrain/
+Assets/URDF/
+Demonstrations/
+ML-Agents/
+Moon Terrain/
+Real Stars Skybox/
+Resources/
+Terrains/
+TutorialInfo/
+URDF/
+msgbrowser_settings.asset
+results/
+Materials/
