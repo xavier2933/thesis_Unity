@@ -1,7 +1,7 @@
 using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
 using RosMessageTypes.Geometry;
-using RosMessageTypes.Std; // For BoolMsg
+using RosMessageTypes.Std;
 
 public class TruckAndArmController : MonoBehaviour
 {
@@ -49,8 +49,8 @@ public class TruckAndArmController : MonoBehaviour
     public string cmdVelTopic = "/cmd_vel";
     public bool useROSInput = true;
 
-    private float rosForward = 0f;
-    private float rosTurn = 0f;
+    public float rosForward = 0f;
+    public float rosTurn = 0f;
 
     private ROSConnection ros;
     private float wristTwistAngle = 0f;
@@ -58,11 +58,19 @@ public class TruckAndArmController : MonoBehaviour
 
     [Header("Reset")]
     // these are world coords relative to base???
+    
+    public float armRotationVariance = 10f; // Range of random rotation for the arm
     public Vector3 resetPositionLocal = new Vector3(0.3f, 0.3f, 0.3f);
+    public float armPosOffset = 0.05f;
     public Vector3 resetRotationEuler = new Vector3(0f, 0f, 0f); // <-- define in degrees
     public Vector3 bloccResetPosition = new Vector3(1.781433f, -1.335353f, -0.5479906f);
     public Vector3 bloccResetRotationEuler = new Vector3(90f, -90f, 0f); // <-- define in degrees
     public GameObject blocc;
+    public GameObject bloccParent;
+    public float bloccPosVariance = 0.2f; // How much X and Z can shift
+    public float bloccRotVariance = 360f; // Randomize Y rotation (0-360)
+    public string resetTopic = "/reset_env";
+
 
     private float posePublishInterval = 0.1f;  // 10 Hz
     private float posePublishTimer = 0f;
@@ -77,7 +85,9 @@ public class TruckAndArmController : MonoBehaviour
         ros.RegisterPublisher<PoseMsg>(targetPoseTopic);
         ros.RegisterPublisher<BoolMsg>(gripperTopic);
         ros.RegisterPublisher<Float32Msg>(wristTopic);
+
         ros.Subscribe<PoseMsg>(targetPoseSubTopic, TargetPoseCallback);
+        ros.Subscribe<BoolMsg>(resetTopic, ResetCallback);
 
 
         if (useROSInput)
@@ -109,8 +119,74 @@ public class TruckAndArmController : MonoBehaviour
         {
             Debug.LogError($"[BUG] Gripper state changed unexpectedly! Was: {lastFrameGripperClosed}, Now: {gripperClosed}");
         }
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            DoReset();
+        }
         lastFrameGripperClosed = gripperClosed;
     }
+
+    private void ResetCallback(BoolMsg msg)
+    {
+        if (msg.data == true)
+        {
+            DoReset();
+        }
+    }
+
+    private void DoReset()
+    {
+        // --- 1. Reset and Randomize Arm ---
+        // Create a random rotation offset for the arm
+        
+        Quaternion armResetRotation = Quaternion.Euler(resetRotationEuler);        
+        // Arm Position Randomization (Existing logic)
+        Vector3 armRandomOffset = new Vector3(
+            Random.Range(-armPosOffset, armPosOffset),
+            Random.Range(-armPosOffset, armPosOffset),
+            Random.Range(-armPosOffset, armPosOffset)
+        );
+        
+        Vector3 basePosition = armBaseTransform.TransformPoint(resetPositionLocal);
+        transform.position = basePosition + armRandomOffset;
+        
+        // Apply base rotation PLUS the random variance
+        transform.rotation = armBaseTransform.rotation * armResetRotation;        
+        PublishCurrentPose();
+
+        // --- 2. Reset and Randomize Blocc ---
+        // if (blocc != null)
+        // {
+        //     Rigidbody rb = blocc.GetComponent<Rigidbody>();
+        //     if (rb != null)
+        //     {
+        //         rb.linearVelocity = Vector3.zero;
+        //         rb.angularVelocity = Vector3.zero;
+
+        //         // Transform parent = blocc.transform.parent;
+        //         Transform parent = bloccParent.transform;
+
+        //         // Randomize X and Z locally
+        //         float randX = Random.Range(-bloccPosVariance, bloccPosVariance);
+        //         float randZ = Random.Range(-bloccPosVariance, bloccPosVariance);
+        //         Vector3 randomizedLocalPos = bloccResetPosition + new Vector3(0, randZ, randX);
+
+        //         // Randomize Rotation (primarily around the vertical axis for a block)
+        //         float randRotY = Random.Range(-bloccRotVariance, bloccRotVariance);
+        //         Quaternion randomizedLocalRot = Quaternion.Euler(bloccResetRotationEuler) * Quaternion.Euler(randRotY, 0, 0);
+
+        //         // Convert to World Space
+        //         Vector3 worldResetPos = parent.TransformPoint(randomizedLocalPos);
+        //         Quaternion worldResetRot = parent.rotation * randomizedLocalRot;
+
+        //         rb.MovePosition(worldResetPos);
+        //         rb.MoveRotation(worldResetRot);
+
+        //         Debug.Log($"[Teleop] Blocc reset with Pos Var: ({randX}, {randZ}) and Rot Var: {randRotY}");
+        //     }
+        // }
+    }    
+    
 
     
     void TargetPoseCallback(PoseMsg msg)
@@ -157,8 +233,9 @@ public class TruckAndArmController : MonoBehaviour
             turn = Mathf.Abs(rosTurn) > 0.01f ? rosTurn : turn;
         }
 
-        float leftInput = forward - turn;
-        float rightInput = forward + turn;
+        float leftInput = forward + turn;
+        float rightInput = forward - turn;
+        // Debug.Log($"[TruckControl] Forward: {forward:F3}, Turn: {turn:F3}, Left: {leftInput:F3}, Right: {rightInput:F3}");
 
         SetTrackMotor(leftTrack, leftInput);
         SetTrackMotor(rightTrack, rightInput);
@@ -170,7 +247,7 @@ public class TruckAndArmController : MonoBehaviour
         {
             if (wheel == null) continue;
             wheel.jointType = ArticulationJointType.RevoluteJoint;
-            wheel.twistLock = ArticulationDofLock.LimitedMotion;
+            wheel.twistLock = ArticulationDofLock.FreeMotion;
             wheel.swingYLock = ArticulationDofLock.LockedMotion;
             wheel.swingZLock = ArticulationDofLock.LockedMotion;
 
@@ -219,40 +296,6 @@ public class TruckAndArmController : MonoBehaviour
 
 
         wristTwistAngle %= 360f;
-
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            Quaternion armResetRotation = Quaternion.Euler(resetRotationEuler);
-            transform.position = armBaseTransform.TransformPoint(resetPositionLocal);
-            transform.rotation = armBaseTransform.rotation * armResetRotation;
-            PublishCurrentPose();
-            Debug.Log("[Teleop] Arm reset to base position");
-
-            // --- Reset blocc ---
-            if (blocc != null)
-            {
-                Rigidbody rb = blocc.GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    rb.linearVelocity = Vector3.zero;
-                    rb.angularVelocity = Vector3.zero;
-
-                    // Convert local reset to world coordinates using the shared parent
-                    Transform parent = blocc.transform.parent;
-                    Vector3 worldResetPos = parent.TransformPoint(bloccResetPosition);
-                    Quaternion worldResetRot = parent.rotation * Quaternion.Euler(bloccResetRotationEuler);
-
-                    rb.MovePosition(worldResetPos);
-                    rb.MoveRotation(worldResetRot);
-
-                    Debug.Log("[Teleop] Blocc reset in parent-local frame");
-                }
-
-                return;
-            }
-        }
-
-
 
         // === POSITION CONTROLS (I, J, K, L, U, O) ===
         Vector3 delta = Vector3.zero;

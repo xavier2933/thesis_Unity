@@ -1,96 +1,76 @@
 using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
 using RosMessageTypes.Geometry;
+using RosMessageTypes.Tf2;
+using RosMessageTypes.Std;
+using RosMessageTypes.BuiltinInterfaces;
+using System;
 
-public class BlockPublisher : MonoBehaviour
+public class BlockTFBroadcaster : MonoBehaviour
 {
-    [Header("ROS Settings")]
-    [SerializeField] private string topicName = "/block_pose";
-    [SerializeField] private float publishFrequency = 10f; // Hz
+    [Header("ROS")]
+    public string childFrame = "block";
+    public float publishRate = 10f;
 
-    [Header("Transform References")]
-    [SerializeField] private Transform referenceFrame; // The frame to compute relative pose
+    [Header("Unity References")]
+    public Transform referenceFrame; 
 
     private ROSConnection ros;
-    private float timer;
     private float publishInterval;
+    private float timer;
 
     void Start()
     {
-        // Get ROS connection
         ros = ROSConnection.GetOrCreateInstance();
-        ros.RegisterPublisher<PoseMsg>(topicName);
+        ros.RegisterPublisher<TFMessageMsg>("/tf");
+        publishInterval = 1f / publishRate;
 
-        // Calculate publish interval
-        publishInterval = 1f / publishFrequency;
-        timer = 0f;
-
-        // Validation
+        // Auto-find panda_link0 if not assigned manually
         if (referenceFrame == null)
         {
-            Debug.LogError("Reference frame not assigned! Please assign a reference frame in the inspector.");
+            GameObject link0 = GameObject.Find("panda_link0");
+            if (link0 != null) referenceFrame = link0.transform;
         }
     }
 
     void Update()
     {
-        if (referenceFrame == null) return;
-
         timer += Time.deltaTime;
-
-        if (timer >= publishInterval)
+        if (timer >= publishInterval && referenceFrame != null)
         {
             timer = 0f;
-            PublishPose();
+            PublishTF();
         }
     }
 
-    void PublishPose()
+    private static TimeMsg UnityTimeNow()
     {
-        // Calculate relative position and rotation
-        Vector3 relativePosition = referenceFrame.InverseTransformPoint(transform.position);
-        Quaternion relativeRotation = Quaternion.Inverse(referenceFrame.rotation) * transform.rotation;
+        double time = Time.realtimeSinceStartupAsDouble;
+        int sec = (int)Math.Floor(time);
+        uint nanosec = (uint)((time - sec) * 1e9);
+        return new TimeMsg(sec, nanosec);
+    }
 
-        // Create ROS Pose message
-        PoseMsg poseMsg = new PoseMsg
+    void PublishTF()
+    {
+        Vector3 relPos = referenceFrame.InverseTransformPoint(transform.position);
+        Quaternion relRot = Quaternion.Inverse(referenceFrame.rotation) * transform.rotation;
+
+        // Unity -> ROS Coordinate Conversion
+        Vector3 rosPos = new Vector3(relPos.z, -relPos.x, relPos.y);
+        Quaternion rosRot = new Quaternion(-relRot.z, relRot.x, -relRot.y, relRot.w);
+
+        TransformStampedMsg tf = new TransformStampedMsg
         {
-            position = new PointMsg
+            header = new HeaderMsg { frame_id = "panda_link0", stamp = UnityTimeNow() },
+            child_frame_id = childFrame,
+            transform = new TransformMsg
             {
-                // Unity to ROS coordinate conversion: (x, y, z) -> (z, -x, y)
-                x = relativePosition.z,
-                y = -relativePosition.x,
-                z = relativePosition.y
-            },
-            orientation = new QuaternionMsg
-            {
-                // Unity to ROS quaternion conversion: (x, y, z, w) -> (-z, x, -y, w)
-                x = -relativeRotation.z,
-                y = relativeRotation.x,
-                z = -relativeRotation.y,
-                w = relativeRotation.w
+                translation = new Vector3Msg { x = rosPos.x, y = rosPos.y, z = rosPos.z },
+                rotation = new QuaternionMsg { x = rosRot.x, y = rosRot.y, z = rosRot.z, w = rosRot.w }
             }
         };
 
-        // Publish to ROS2
-        ros.Publish(topicName, poseMsg);
-    }
-
-    // Optional: Visualize the relative pose in the editor
-    void OnDrawGizmos()
-    {
-        if (referenceFrame == null) return;
-
-        // Draw reference frame
-        Gizmos.color = Color.blue;
-        Gizmos.DrawWireSphere(referenceFrame.position, 0.1f);
-        Gizmos.DrawLine(referenceFrame.position, referenceFrame.position + referenceFrame.forward * 0.3f);
-
-        // Draw this object
-        Gizmos.color = Color.green;
-        Gizmos.DrawWireSphere(transform.position, 0.1f);
-        
-        // Draw connection
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawLine(referenceFrame.position, transform.position);
+        ros.Publish("/tf", new TFMessageMsg(new[] { tf }));
     }
 }
