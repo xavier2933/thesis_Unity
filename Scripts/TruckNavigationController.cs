@@ -23,6 +23,8 @@ public class SimpleTruckNav : MonoBehaviour
 
     [Header("Curve Following")]
     public bool useCurveFollowing = false;
+    // Add this field at the top with the other curve data
+    private bool curveAligning = false;
     
     [Header("Settings")]
     public float moveSpeed = 0.2f;
@@ -40,6 +42,11 @@ public class SimpleTruckNav : MonoBehaviour
     [Header("Visualization")]
     public bool showPath = true;
     public Color pathColor = Color.cyan;
+    [Header("Inspector Testing - Obstacle Avoidance")]
+    public Vector3 testObstaclePos = new Vector3(2, 0, 3);
+    public Vector3 testAvoidEndPoint = new Vector3(0, 0, 6);
+    public float testAvoidEndHeading = 0f;
+    public bool testAvoidLeft = true;
     
     [Header("Inspector Testing")]
     public Vector3 testWaypoint = new Vector3(5, 0, 5);
@@ -189,90 +196,89 @@ public class SimpleTruckNav : MonoBehaviour
 
     void FollowBezierCurve(ref float forwardCmd, ref float turnCmd)
     {
-        // NEW BEZIER CURVE FOLLOWING
         if (curvePoints.Count == 0) return;
-        
+
         Vector3 currentPos = transform.position;
         currentPos.y = 0;
-        
-        // Find closest point on curve
-        float closestDist = float.MaxValue;
-        int closestIndex = 0;
-        
-        for (int i = 0; i < curvePoints.Count; i++)
+
+        // ── Phase 2: rotate in place to final heading ──────────────────
+        if (curveAligning)
         {
-            Vector3 curvePoint = curvePoints[i];
-            curvePoint.y = 0;
-            float dist = Vector3.Distance(currentPos, curvePoint);
-            
-            if (dist < closestDist)
-            {
-                closestDist = dist;
-                closestIndex = i;
-            }
-        }
-        
-        // Find pursuit point ahead along curve
-        float currentDistance = curveDistances[closestIndex];
-        float targetDistance = currentDistance + lookAheadDistance;
-        
-        int pursuitIndex = closestIndex;
-        for (int i = closestIndex; i < curvePoints.Count; i++)
-        {
-            if (curveDistances[i] >= targetDistance)
-            {
-                pursuitIndex = i;
-                break;
-            }
-            pursuitIndex = i;
-        }
-        
-        Vector3 pursuitPoint = curvePoints[pursuitIndex];
-        pursuitPoint.y = currentPos.y;
-        
-        float distanceToEnd = totalCurveLength - currentDistance;
-        
-        // Navigate toward pursuit point
-        Vector3 toPursuit = pursuitPoint - currentPos;
-        toPursuit.y = 0;
-        float desiredHeading = Mathf.Atan2(toPursuit.x, toPursuit.z) * Mathf.Rad2Deg;
-        float headingError = Mathf.DeltaAngle(transform.eulerAngles.y, desiredHeading);
-        
-        if (Mathf.Abs(headingError) > angleTolerance)
-        {
-            turnCmd = ApplyDeadband(Mathf.Clamp(headingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
-        }
-        
-        if (distanceToEnd > stopDistance)
-        {
-            if (Mathf.Abs(headingError) < 30f)
-            {
-                float speedMult = Mathf.Clamp01(distanceToEnd / (stopDistance * 2));
-                float finalSpeedMult = isFinalGoal ? 0.5f : 1.0f;
-                forwardCmd = ApplyDeadband(moveSpeed * Mathf.Max(speedMult, 0.5f) * finalSpeedMult, minForwardCmd);
-            }
-        }
-        else
-        {
-            // Near end - check final heading alignment
             float finalHeadingError = Mathf.DeltaAngle(transform.eulerAngles.y, targetHeading);
-            
+
             if (Mathf.Abs(finalHeadingError) <= angleTolerance)
             {
-                Debug.Log($"<color=white>Reached end of curve with correct heading!</color>");
+                Debug.Log($"<color=white>Curve complete — heading aligned!</color>");
+                curveAligning = false;
                 StopRobot();
                 hasGoal = false;
             }
             else
             {
-                turnCmd = ApplyDeadband(Mathf.Clamp(finalHeadingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
+                turnCmd = ApplyDeadband(
+                    Mathf.Clamp(finalHeadingError / 5f, -1f, 1f) * 1.0f * turnSpeed,
+                    minTurnCmd
+                );
+                // forwardCmd stays 0
             }
+            return;
         }
-        
-        if (Time.frameCount % 30 == 0)
+
+        // ── Phase 1: follow the curve ──────────────────────────────────
+        float closestDist = float.MaxValue;
+        int closestIndex = 0;
+
+        for (int i = 0; i < curvePoints.Count; i++)
         {
-            Debug.Log($"[CURVE] Progress: {currentDistance:F2}/{totalCurveLength:F2}m, DistToEnd: {distanceToEnd:F2}m, Heading: {headingError:F1}°");
+            Vector3 cp = curvePoints[i];
+            cp.y = 0;
+            float dist = Vector3.Distance(currentPos, cp);
+            if (dist < closestDist) { closestDist = dist; closestIndex = i; }
         }
+
+        float currentDistance = curveDistances[closestIndex];
+        float distanceToEnd   = totalCurveLength - currentDistance;
+
+        // Transition to Phase 2 when close enough
+        if (distanceToEnd <= stopDistance)
+        {
+            Debug.Log($"<color=white>Aligning</color>");
+
+            curveAligning = true;
+            StopRobot();
+            return;
+        }
+
+        // Pursuit point
+        float targetDistance = currentDistance + lookAheadDistance;
+        int pursuitIndex = closestIndex;
+        for (int i = closestIndex; i < curvePoints.Count; i++)
+        {
+            pursuitIndex = i;
+            if (curveDistances[i] >= targetDistance) break;
+        }
+
+        Vector3 pursuitPoint = curvePoints[pursuitIndex];
+        pursuitPoint.y = currentPos.y;
+
+        Vector3 toPursuit = pursuitPoint - currentPos;
+        toPursuit.y = 0;
+
+        float desiredHeading = Mathf.Atan2(toPursuit.x, toPursuit.z) * Mathf.Rad2Deg;
+        float headingError   = Mathf.DeltaAngle(transform.eulerAngles.y, desiredHeading);
+
+        if (Mathf.Abs(headingError) > angleTolerance)
+            turnCmd = ApplyDeadband(Mathf.Clamp(headingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
+
+        if (Mathf.Abs(headingError) < 30f)
+        {
+            float speedMult      = Mathf.Clamp01(distanceToEnd / (stopDistance * 2));
+            float finalSpeedMult = isFinalGoal ? 0.5f : 1.0f;
+            forwardCmd = ApplyDeadband(moveSpeed * Mathf.Max(speedMult, 0.5f) * finalSpeedMult, minForwardCmd);
+        }
+
+        if (Time.frameCount % 30 == 0)
+            Debug.Log($"[CURVE P1] Dist: {currentDistance:F2}/{totalCurveLength:F2}m, ToEnd: {distanceToEnd:F2}m, Heading err: {headingError:F1}°");
     }
 
     float ApplyDeadband(float input, float minPower)
@@ -329,12 +335,79 @@ public class SimpleTruckNav : MonoBehaviour
         isFinalGoal = finalGoal;
         useLineFollowing = false;
         useCurveFollowing = true;
+        curveAligning = false;
         
         // Generate Bezier curve
         GenerateBezierCurve(start, end, endHeading);
         hasGoal = true;
         
         Debug.Log($"<color=magenta>[CURVE GOAL] Start: {start}, End: {end}, EndHeading: {endHeading:F1}°</color>");
+    }
+
+    public void SetObstacleAvoidanceGoal(Vector3 start, Vector3 end, Vector3 obstaclePos, float endHeading, bool avoidLeft = true, bool finalGoal = false)
+    {
+        targetPosition = end;
+        targetHeading = endHeading;
+        isFinalGoal = finalGoal;
+        useLineFollowing = false;
+        useCurveFollowing = true;
+        curveAligning = false;
+
+        p0 = start; p0.y = 0;
+        p3 = end;   p3.y = 0;
+
+        Vector3 pathDir = (p3 - p0).normalized;
+        Vector3 lateral = Vector3.Cross(Vector3.up, pathDir) * (avoidLeft ? 1f : -1f);
+
+        float startHeading = transform.eulerAngles.y;
+        float d = Vector3.Distance(p0, p3) / 2f;
+
+        float phi   = startHeading * Mathf.Deg2Rad;
+        float theta = endHeading   * Mathf.Deg2Rad;
+
+        // Base control points from headings
+        p1 = p0 + d * new Vector3(Mathf.Sin(phi),  0, Mathf.Cos(phi));
+        p2 = p3 - d * new Vector3(Mathf.Sin(theta), 0, Mathf.Cos(theta));
+
+        // Project obstacle onto the path line
+        Vector3 toObstacle = (obstaclePos - p0);
+        toObstacle.y = 0;
+        float projectedDist = Vector3.Dot(toObstacle, pathDir);
+        Vector3 closestPointOnPath = p0 + pathDir * projectedDist;
+
+        // How far is the rock from the straight line path
+        float lateralOffset = Vector3.Distance(closestPointOnPath, new Vector3(obstaclePos.x, 0, obstaclePos.z));
+
+        // We want the curve to pass at least rockClearance meters to the side
+        float rockClearance = 3.5f; // tune this — meters of clearance from rock edge
+        float requiredPush = Mathf.Max(0f, rockClearance - lateralOffset) + rockClearance;
+
+        Debug.Log($"[AVOID] lateralOffset={lateralOffset:F2}, requiredPush={requiredPush:F2}");
+
+        // Push both control points sideways — this is what actually bends the arc
+        p1 += lateral * requiredPush;
+        p2 += lateral * requiredPush;
+
+        // Rebuild curve
+        curvePoints.Clear();
+        curveDistances.Clear();
+        totalCurveLength = 0f;
+        Vector3 prev = p0;
+
+        for (int i = 0; i <= curveResolution; i++)
+        {
+            float t = (float)i / curveResolution;
+            Vector3 point = GetBezierPoint(t);
+            curvePoints.Add(point);
+            if (i > 0) totalCurveLength += Vector3.Distance(prev, point);
+            curveDistances.Add(totalCurveLength);
+            prev = point;
+        }
+
+        hasGoal = true;
+        VisualizeCurve();
+
+        Debug.Log($"<color=green>[AVOID] Rock at {obstaclePos}, push={requiredPush:F2}m {(avoidLeft ? "left" : "right")}</color>");
     }
 
     void GenerateBezierCurve(Vector3 start, Vector3 end, float endHeading)
@@ -450,6 +523,14 @@ public class SimpleTruckNav : MonoBehaviour
         SetLineGoal(start, testWaypoint);
         Debug.Log($"<color=yellow>TEST: Straight line to {testWaypoint}</color>");
     }
+
+    [ContextMenu("Test: Avoid Obstacle")]
+    void TestObstacleAvoidance()
+    {
+        Vector3 start = transform.position;
+        SetObstacleAvoidanceGoal(start, testAvoidEndPoint, testObstaclePos, testAvoidEndHeading, testAvoidLeft);
+        Debug.Log($"<color=green>TEST: Avoiding obstacle at {testObstaclePos}, going to {testAvoidEndPoint}</color>");
+    }
     
     [ContextMenu("Test: Go To Waypoint (Curved)")]
     void TestCurvedWaypoint()
@@ -498,6 +579,21 @@ public class SimpleTruckNav : MonoBehaviour
         #if UNITY_EDITOR
         UnityEditor.Handles.Label(testWaypoint + Vector3.up * 0.5f, 
             testUseCurve ? $"Test (Curve)\n{testHeading:F0}°" : "Test (Straight)");
+        #endif
+
+        // Add inside OnDrawGizmos()
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(testObstaclePos, 0.3f);
+        Gizmos.DrawWireSphere(testAvoidEndPoint, 0.3f);
+
+        Vector3 avoidHeadingDir = Quaternion.Euler(0, testAvoidEndHeading, 0) * Vector3.forward;
+        Gizmos.color = Color.green;
+        Gizmos.DrawRay(testAvoidEndPoint, avoidHeadingDir * 1.0f);
+
+        #if UNITY_EDITOR
+        UnityEditor.Handles.Label(testObstaclePos + Vector3.up * 0.5f, "Obstacle");
+        UnityEditor.Handles.Label(testAvoidEndPoint + Vector3.up * 0.5f, 
+            $"Avoid End\n{testAvoidEndHeading:F0}° {(testAvoidLeft ? "←" : "→")}");
         #endif
         
         // Draw current rover position and heading

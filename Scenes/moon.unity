@@ -7429,7 +7429,7 @@ MonoBehaviour:
   lineEnd: {x: 0, y: 0, z: 0}
   lookAheadDistance: 0.75
   useCurveFollowing: 0
-  moveSpeed: 0.18
+  moveSpeed: 0.1
   turnSpeed: 0.65
   stopDistance: 0.4
   angleTolerance: 7
@@ -7438,8 +7438,12 @@ MonoBehaviour:
   controller: {fileID: 2113696334}
   showPath: 1
   pathColor: {r: 0, g: 1, b: 1, a: 1}
-  testWaypoint: {x: 410, y: 18, z: 255}
-  testHeading: 270
+  testObstaclePos: {x: 410, y: 18, z: 255}
+  testAvoidEndPoint: {x: 415, y: 18, z: 255}
+  testAvoidEndHeading: 0
+  testAvoidLeft: 1
+  testWaypoint: {x: 410, y: 18, z: 258}
+  testHeading: 90
   testUseCurve: 0
 --- !u!4 &813948115
 Transform:
@@ -7583,6 +7587,7 @@ MonoBehaviour:
   ropeDeployTopicName: rover/deploy_rope
   waypointTopicName: rover/waypoint
   curvedGoalTopicName: rover/curved_goal
+  obstacleAvoidTopicName: rover/avoid_obstacle
   testWaypoint: {x: 0, y: 0, z: 0}
   currentPlateIndex: -1
   isAtPlate: 0

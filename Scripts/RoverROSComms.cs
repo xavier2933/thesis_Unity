@@ -21,6 +21,8 @@ public class RoverROSComms : MonoBehaviour
     public string ropeDeployTopicName = "rover/deploy_rope";
     public string waypointTopicName = "rover/waypoint";
     public string curvedGoalTopicName = "rover/curved_goal";
+    public string obstacleAvoidTopicName = "rover/avoid_obstacle";
+
 
     [Header("Manual Test")]
     public Vector3 testWaypoint;
@@ -56,6 +58,8 @@ public class RoverROSComms : MonoBehaviour
         
         // Subscribe to move commands
         ros.Subscribe<Int32Msg>(moveCommandTopicName, OnMoveCommandReceived);
+        ros.Subscribe<PoseMsg>(obstacleAvoidTopicName, OnObstacleAvoidReceived);
+
         
         Debug.Log("<color=cyan>[ROS] RoverROSComms initialized</color>");
     }
@@ -79,6 +83,43 @@ public class RoverROSComms : MonoBehaviour
         // Flag navigating so ROS wait_for_unity_arrival() works
         isNavigating = true;
         Debug.Log($"<color=magenta>[ROS] Curved goal received: {endPoint}, heading={endHeading}°, final={isFinal}</color>");
+    }
+
+    private void OnObstacleAvoidReceived(PoseMsg msg)
+    {
+        if (truckNav == null)
+        {
+            Debug.LogError("[ROS] SimpleTruckNav reference is null!");
+            return;
+        }
+
+        // position = obstacle world position
+        // orientation.z = end heading (degrees)
+        // orientation.x = avoidLeft (1 = left, 0 = right)
+        // orientation.w = isFinal
+
+        Vector3 obstaclePos = new Vector3(
+            (float)msg.position.x,
+            (float)msg.position.y,
+            (float)msg.position.z
+        );
+
+        // End point is packed separately — we need a destination
+        // Convention: send a second waypoint via curved_goal first, or pack end into header
+        // Here we derive end point as X meters past the obstacle along current heading
+        float passDistance = 4f; // how far past the rock to target
+        Vector3 forward = truckNav.transform.forward;
+        Vector3 startPoint = truckNav.transform.position;
+        Vector3 endPoint = obstaclePos + forward * passDistance;
+
+        float endHeading = (float)msg.orientation.z;
+        bool avoidLeft = msg.orientation.x > 0.5f;
+        bool isFinal = msg.orientation.w > 0.5f;
+
+        truckNav.SetObstacleAvoidanceGoal(startPoint, endPoint, obstaclePos, endHeading, avoidLeft, isFinal);
+        isNavigating = true;
+
+        Debug.Log($"<color=green>[ROS] Obstacle avoidance received: rock at {obstaclePos}, avoid {(avoidLeft ? "left" : "right")}, heading={endHeading}°</color>");
     }
 
     private void OnWaypointReceived(RosMessageTypes.Geometry.PoseMsg msg)
