@@ -125,41 +125,42 @@ public class SimpleTruckNav : MonoBehaviour
 
     void FollowStraightLine(ref float forwardCmd, ref float turnCmd)
     {
-        // EXACT ORIGINAL IMPLEMENTATION
-        Vector3 lineDir = (lineEnd - lineStart).normalized;
+        // Fully 2D — ignore Y for all distance/progress calculations
+        Vector3 lineDirFull = lineEnd - lineStart;
+        lineDirFull.y = 0;
+        float lineLength = lineDirFull.magnitude;
+        Vector3 lineDir = lineDirFull.normalized;
+
         Vector3 toRover = transform.position - lineStart;
         toRover.y = 0;
         float progressAlongLine = Vector3.Dot(toRover, lineDir);
         
-        float pursuitProgress = progressAlongLine + lookAheadDistance;
-        
-        float lineLength = Vector3.Distance(lineStart, lineEnd);
-        pursuitProgress = Mathf.Clamp(pursuitProgress, 0, lineLength);
+        float pursuitProgress = Mathf.Clamp(progressAlongLine + lookAheadDistance, 0, lineLength);
         Vector3 pursuitPoint = lineStart + lineDir * pursuitProgress;
-        pursuitPoint.y = transform.position.y;
+        pursuitPoint.y = 0; // keep flat
         
         float distanceToEnd = lineLength - progressAlongLine;
-        
-        Vector3 toPursuit = pursuitPoint - transform.position;
-        toPursuit.y = 0;
-        float desiredHeading = Mathf.Atan2(toPursuit.x, toPursuit.z) * Mathf.Rad2Deg;
-        float headingError = Mathf.DeltaAngle(transform.eulerAngles.y, desiredHeading);
-        
-        if (Mathf.Abs(headingError) > angleTolerance)
+
+        // ── Overshoot recovery: rover has passed the endpoint — reverse back ─
+        if (distanceToEnd < 0f)
         {
-            turnCmd = ApplyDeadband(Mathf.Clamp(headingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
+            // Keep heading aligned with the line; drive in reverse to return
+            float lineHeading = Mathf.Atan2(lineDir.x, lineDir.z) * Mathf.Rad2Deg;
+            float reverseHeadingError = Mathf.DeltaAngle(transform.eulerAngles.y, lineHeading);
+
+            if (Time.frameCount % 30 == 0)
+                Debug.Log($"<color=orange>[LINE] OVERSHOOT — {-distanceToEnd:F2}m past end. Reversing... alignErr={reverseHeadingError:F1}°</color>");
+
+            // Steer to keep aligned with line direction while going in reverse
+            turnCmd = ApplyDeadband(Mathf.Clamp(reverseHeadingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
+            forwardCmd = -ApplyDeadband(moveSpeed * 0.9f, minForwardCmd); // always reverse
+            return;
         }
-        
-        if (distanceToEnd > stopDistance)
-        {
-            if (Mathf.Abs(headingError) < 30f)
-            {
-                float speedMult = Mathf.Clamp01(distanceToEnd / (stopDistance * 2));
-                float finalSpeedMult = isFinalGoal ? 0.5f : 1.0f;
-                forwardCmd = ApplyDeadband(moveSpeed * Mathf.Max(speedMult, 0.5f) * finalSpeedMult, minForwardCmd);
-            }
-        }
-        
+        // ──────────────────────────────────────────────────────────────────
+
+        // ── Phase 2: near endpoint — switch to pure targetHeading alignment ──
+        // Don't use pursuit-point direction here: the vector is tiny (~0.05m)
+        // so any lateral offset causes wildly noisy heading errors.
         if (distanceToEnd <= stopDistance)
         {
             float finalHeadingError = Mathf.DeltaAngle(transform.eulerAngles.y, targetHeading);
@@ -173,12 +174,30 @@ public class SimpleTruckNav : MonoBehaviour
             {
                 turnCmd = ApplyDeadband(Mathf.Clamp(finalHeadingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
             }
+
+            if (Time.frameCount % 30 == 0)
+                Debug.Log($"[LINE P2] DistToEnd: {distanceToEnd:F2}m, FinalHeadingErr: {finalHeadingError:F1}°");
+            return;
         }
-        
-        if (Time.frameCount % 30 == 0)
+
+        // ── Phase 1: following the line via pursuit point ─────────────────
+        Vector3 toPursuit = pursuitPoint - transform.position;
+        toPursuit.y = 0;
+        float desiredHeading = Mathf.Atan2(toPursuit.x, toPursuit.z) * Mathf.Rad2Deg;
+        float headingError = Mathf.DeltaAngle(transform.eulerAngles.y, desiredHeading);
+
+        if (Mathf.Abs(headingError) > angleTolerance)
+            turnCmd = ApplyDeadband(Mathf.Clamp(headingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
+
+        if (Mathf.Abs(headingError) < 30f)
         {
-            Debug.Log($"[LINE] Progress: {progressAlongLine:F2}/{lineLength:F2}m, DistToEnd: {distanceToEnd:F2}m, Heading: {headingError:F1}°");
+            float speedMult = Mathf.Clamp01(distanceToEnd / (stopDistance * 2));
+            float finalSpeedMult = isFinalGoal ? 0.5f : 1.0f;
+            forwardCmd = ApplyDeadband(moveSpeed * Mathf.Max(speedMult, 0.5f) * finalSpeedMult, minForwardCmd);
         }
+
+        if (Time.frameCount % 30 == 0)
+            Debug.Log($"[LINE P1] Progress: {progressAlongLine:F2}/{lineLength:F2}m, DistToEnd: {distanceToEnd:F2}m, HeadingErr: {headingError:F1}°");
     }
 
     void NavigateToWaypoint(ref float forwardCmd, ref float turnCmd)
