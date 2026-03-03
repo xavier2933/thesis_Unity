@@ -22,6 +22,10 @@ public class RoverROSComms : MonoBehaviour
     public string waypointTopicName = "rover/waypoint";
     public string curvedGoalTopicName = "rover/curved_goal";
     public string obstacleAvoidTopicName = "rover/avoid_obstacle";
+    public string teleportTopicName = "rover/teleport";
+    public string rotateToHeadingTopicName = "rover/rotate_to_heading";
+
+
 
 
     [Header("Manual Test")]
@@ -55,6 +59,10 @@ public class RoverROSComms : MonoBehaviour
         ros.Subscribe<BoolMsg>(ropeDeployTopicName, OnRopeCommandReceived);
         ros.Subscribe<PoseMsg>(waypointTopicName, OnWaypointReceived);
         ros.Subscribe<PoseMsg>(curvedGoalTopicName, OnCurvedGoalReceived);
+        ros.Subscribe<PoseMsg>(teleportTopicName, OnTeleportReceived);
+        ros.Subscribe<Float32Msg>(rotateToHeadingTopicName, OnRotateToHeadingReceived);
+
+
         
         // Subscribe to move commands
         ros.Subscribe<Int32Msg>(moveCommandTopicName, OnMoveCommandReceived);
@@ -63,6 +71,59 @@ public class RoverROSComms : MonoBehaviour
         
         Debug.Log("<color=cyan>[ROS] RoverROSComms initialized</color>");
     }
+
+
+    private void OnRotateToHeadingReceived(Float32Msg msg)
+    {
+        if (truckNav == null) { Debug.LogError("[ROS] SimpleTruckNav is null!"); return; }
+        truckNav.RotateInPlace((float)msg.data);
+        isNavigating = true;
+        Debug.Log($"<color=cyan>[ROS] 🧭 Rotate-in-place to {(float)msg.data:F0}°</color>");
+    }
+
+
+    private void OnTeleportReceived(PoseMsg msg)
+    {
+        ArticulationBody ab = roverTransform.GetComponent<ArticulationBody>();
+
+        // Mapping ROS -> Unity
+        // ROS (x, y, z) -> Unity (x, z, y) based on your SendPlateLocations mapping
+        Vector3 targetPos = new Vector3(
+            (float)msg.position.x,
+            (float)msg.position.z, 
+            (float)msg.position.y
+        );
+
+        // Convert ROS Quaternion to Unity Quaternion
+        // We swap y/z and negate w to handle the coordinate system hand-change
+        Quaternion targetRot = new Quaternion(
+            (float)msg.orientation.x,
+            (float)msg.orientation.z,
+            (float)msg.orientation.y,
+            -(float)msg.orientation.w
+        );
+
+        if (ab != null)
+        {
+            // TeleportRoot is essential for ArticulationBodies
+            ab.TeleportRoot(targetPos, targetRot);
+            
+            // Kill any existing momentum so it doesn't "drift" after teleporting
+            ab.linearVelocity = Vector3.zero;
+            ab.angularVelocity = Vector3.zero;
+        }
+        else
+        {
+            roverTransform.SetPositionAndRotation(targetPos, targetRot);
+        }
+
+        // Stop navigation so ROS isn't waiting for an arrival that won't happen
+        if (truckNav != null) { truckNav.hasGoal = false; truckNav.StopRobot(); }
+        isNavigating = false;
+
+        Debug.Log($"<color=cyan>[ROS] 🚀 Articulation Teleported to {targetPos} with valid rotation.</color>");
+    }
+
 
     private void OnCurvedGoalReceived(PoseMsg msg)
     {

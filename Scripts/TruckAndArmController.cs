@@ -47,6 +47,7 @@ public class TruckAndArmController : MonoBehaviour
 
     [Header("ROS Input Settings")]
     public string cmdVelTopic = "/cmd_vel";
+    public string autonomousModeTopic = "/autonomous_mode";
     public bool useROSInput = true;
 
     public float rosForward = 0f;
@@ -92,6 +93,8 @@ public class TruckAndArmController : MonoBehaviour
 
         if (useROSInput)
             ros.Subscribe<TwistMsg>(cmdVelTopic, CmdVelCallback);
+
+        ros.Subscribe<BoolMsg>(autonomousModeTopic, OnAutonomousModeReceived);
 
         if (armBaseTransform == null)
             Debug.LogError("Arm Base Transform not assigned! Drag your arm base link here.");
@@ -272,8 +275,14 @@ public class TruckAndArmController : MonoBehaviour
 
     void CmdVelCallback(TwistMsg msg)
     {
-        rosForward = (float)msg.linear.x;
-        rosTurn = (float)msg.angular.z;
+        // rosForward = (float)msg.linear.x;
+        // rosTurn = (float)msg.angular.z;
+    }
+
+    void OnAutonomousModeReceived(BoolMsg msg)
+    {
+        useROSInput = msg.data;
+        Debug.Log($"<color=cyan>[TruckCtrl] Autonomous mode: {msg.data} → useROSInput={useROSInput}</color>");
     }
 
     // ================================

@@ -2297,13 +2297,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 189206438}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.59103894, y: -0.59103894, z: -0.3881662, w: 0.3881662}
-  m_LocalPosition: {x: 2.21, y: -1.06, z: 2.65}
+  m_LocalRotation: {x: 0.615404, y: -0.615404, z: -0.34824976, w: 0.34824976}
+  m_LocalPosition: {x: 4.65, y: -1.06, z: 1.22}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 895582104}
-  m_LocalEulerAnglesHint: {x: 0, y: -113.41, z: -90}
+  m_LocalEulerAnglesHint: {x: 0, y: -120.99, z: -90}
 --- !u!114 &189206440
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3561,6 +3561,7 @@ MonoBehaviour:
   driveForce: 1000
   maxSpeed: 500
   cmdVelTopic: /cmd_vel
+  autonomousModeTopic: /autonomous_mode
   useROSInput: 1
   rosForward: 0
   rosTurn: 0
@@ -7429,7 +7430,8 @@ MonoBehaviour:
   lineEnd: {x: 0, y: 0, z: 0}
   lookAheadDistance: 0.75
   useCurveFollowing: 0
-  moveSpeed: 0.1
+  curveAlignmentTimeout: 5
+  moveSpeed: 0.6
   turnSpeed: 0.65
   stopDistance: 0.4
   angleTolerance: 7
@@ -7588,6 +7590,7 @@ MonoBehaviour:
   waypointTopicName: rover/waypoint
   curvedGoalTopicName: rover/curved_goal
   obstacleAvoidTopicName: rover/avoid_obstacle
+  teleportTopicName: rover/teleport
   testWaypoint: {x: 0, y: 0, z: 0}
   currentPlateIndex: -1
   isAtPlate: 0
@@ -7733,7 +7736,7 @@ MonoBehaviour:
   startPoint: {fileID: 86891469}
   endPoint: {fileID: 1914021524}
   rover: {fileID: 813948115}
-  numberOfRocks: 1
+  numberOfRocks: 0
 --- !u!4 &821012239 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 6d8440ee22bfa844a82befeb8931b88c, type: 3}
@@ -19381,6 +19384,7 @@ MonoBehaviour:
   driveForce: 5000
   maxSpeed: 500
   cmdVelTopic: /cmd_vel
+  autonomousModeTopic: /autonomous_mode
   useROSInput: 1
   rosForward: 0
   rosTurn: 0

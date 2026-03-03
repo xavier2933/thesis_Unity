@@ -25,6 +25,8 @@ public class SimpleTruckNav : MonoBehaviour
     public bool useCurveFollowing = false;
     // Add this field at the top with the other curve data
     private bool curveAligning = false;
+    private float curveAlignStartTime = 0f;
+    public float curveAlignmentTimeout = 5.0f; // Max seconds to spend aligning heading
     
     [Header("Settings")]
     public float moveSpeed = 0.2f;
@@ -34,7 +36,7 @@ public class SimpleTruckNav : MonoBehaviour
 
     [Header("Friction Compensation")]
     public float minForwardCmd = 0.25f;
-    public float minTurnCmd = 0.5f;
+    public float minTurnCmd = 0.65f;
 
     [Header("References")]
     public TruckAndArmController controller;
@@ -62,6 +64,9 @@ public class SimpleTruckNav : MonoBehaviour
     
     // Line renderer for path visualization
     private LineRenderer lineRenderer;
+    private bool  rotatingInPlace    = false;
+    private float rotateTargetHeading = 0f;
+
 
     void Start()
     {
@@ -70,6 +75,25 @@ public class SimpleTruckNav : MonoBehaviour
 
     void Update()
     {
+        if (rotatingInPlace)
+        {
+            float err = Mathf.DeltaAngle(transform.eulerAngles.y, rotateTargetHeading);
+            if (Mathf.Abs(err) <= angleTolerance)
+            {
+                Debug.Log($"<color=white>[NAV] RotateInPlace done — {transform.eulerAngles.y:F1}°</color>");
+                rotatingInPlace = false;
+                StopRobot();
+                hasGoal = false;   // ← signals ROS that "arrival" happened
+            }
+            else
+            {
+                float rawTurn = Mathf.Clamp(err / 20f, -1f, 1f) * turnSpeed;
+                controller.rosForward = 0f;
+                controller.rosTurn    = ApplyDeadband(rawTurn, minTurnCmd);
+            }
+            return;   // skip all other nav logic while rotating
+        }
+        
         if (!hasGoal || controller == null) 
         {
             StopRobot();
@@ -205,22 +229,34 @@ public class SimpleTruckNav : MonoBehaviour
         if (curveAligning)
         {
             float finalHeadingError = Mathf.DeltaAngle(transform.eulerAngles.y, targetHeading);
+            float alignElapsed = Time.time - curveAlignStartTime;
 
+            // Success: heading is within tolerance
             if (Mathf.Abs(finalHeadingError) <= angleTolerance)
             {
-                Debug.Log($"<color=white>Curve complete — heading aligned!</color>");
+                Debug.Log($"<color=white>Curve complete — heading aligned! (took {alignElapsed:F1}s)</color>");
+                curveAligning = false;
+                StopRobot();
+                hasGoal = false;
+            }
+            // Timeout: accept current heading and move on
+            else if (alignElapsed > curveAlignmentTimeout)
+            {
+                Debug.LogWarning($"[CURVE P2] Alignment timeout after {curveAlignmentTimeout}s (error: {finalHeadingError:F1}°). Accepting current heading.");
                 curveAligning = false;
                 StopRobot();
                 hasGoal = false;
             }
             else
             {
-                turnCmd = ApplyDeadband(
-                    Mathf.Clamp(finalHeadingError / 5f, -1f, 1f) * 1.0f * turnSpeed,
-                    minTurnCmd
-                );
+                // Apply deadband so turn never drops below the physical rotation threshold
+                float rawTurn = Mathf.Clamp(finalHeadingError / 20f, -1f, 1f) * turnSpeed;
+                turnCmd = ApplyDeadband(rawTurn, minTurnCmd);
                 // forwardCmd stays 0
             }
+
+            if (Time.frameCount % 30 == 0)
+                Debug.Log($"[CURVE P2] Heading err: {finalHeadingError:F1}°, elapsed: {alignElapsed:F1}s");
             return;
         }
 
@@ -239,12 +275,16 @@ public class SimpleTruckNav : MonoBehaviour
         float currentDistance = curveDistances[closestIndex];
         float distanceToEnd   = totalCurveLength - currentDistance;
 
-        // Transition to Phase 2 when close enough
-        if (distanceToEnd <= stopDistance)
-        {
-            Debug.Log($"<color=white>Aligning</color>");
+        // Also check straight-line distance to the actual endpoint
+        Vector3 endFlat = p3; endFlat.y = 0;
+        float spatialDistToEnd = Vector3.Distance(currentPos, endFlat);
 
+        // Transition to Phase 2: align heading at end of ALL curves
+        if (distanceToEnd <= stopDistance && spatialDistToEnd <= stopDistance * 2f)
+        {
+            Debug.Log($"<color=white>Curve reached end — aligning heading (final={isFinalGoal})</color>");
             curveAligning = true;
+            curveAlignStartTime = Time.time;
             StopRobot();
             return;
         }
@@ -268,17 +308,17 @@ public class SimpleTruckNav : MonoBehaviour
         float headingError   = Mathf.DeltaAngle(transform.eulerAngles.y, desiredHeading);
 
         if (Mathf.Abs(headingError) > angleTolerance)
-            turnCmd = ApplyDeadband(Mathf.Clamp(headingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
+            turnCmd = ApplyDeadband(Mathf.Clamp(headingError / 20f, -1f, 1f) * turnSpeed, minTurnCmd);
 
-        if (Mathf.Abs(headingError) < 30f)
+        if (Mathf.Abs(headingError) < 20f)
         {
             float speedMult      = Mathf.Clamp01(distanceToEnd / (stopDistance * 2));
             float finalSpeedMult = isFinalGoal ? 0.5f : 1.0f;
-            forwardCmd = ApplyDeadband(moveSpeed * Mathf.Max(speedMult, 0.5f) * finalSpeedMult, minForwardCmd);
+            forwardCmd = ApplyDeadband(0.2f * Mathf.Max(speedMult, 0.5f) * finalSpeedMult, minForwardCmd);
         }
 
         if (Time.frameCount % 30 == 0)
-            Debug.Log($"[CURVE P1] Dist: {currentDistance:F2}/{totalCurveLength:F2}m, ToEnd: {distanceToEnd:F2}m, Heading err: {headingError:F1}°");
+            Debug.Log($"[CURVE P1] Dist: {currentDistance:F2}/{totalCurveLength:F2}m, ToEnd: {distanceToEnd:F2}m, Spatial: {spatialDistToEnd:F2}m, Heading err: {headingError:F1}°");
     }
 
     float ApplyDeadband(float input, float minPower)
@@ -289,6 +329,8 @@ public class SimpleTruckNav : MonoBehaviour
 
     public void StopRobot() 
     { 
+        curveAligning = false;
+        hasGoal = false;
         if (controller != null)
         {
             controller.rosForward = 0; 
@@ -305,8 +347,21 @@ public class SimpleTruckNav : MonoBehaviour
         isFinalGoal = finalGoal;
         useLineFollowing = false;
         useCurveFollowing = false;
+        curveAligning = false; 
         ClearPathVisualization();
     }
+
+    public void RotateInPlace(float targetHeading)
+    {
+        rotatingInPlace     = true;
+        rotateTargetHeading = targetHeading;
+        hasGoal             = true;
+        useLineFollowing    = false;
+        useCurveFollowing   = false;
+        curveAligning       = false;
+        Debug.Log($"<color=cyan>[NAV] RotateInPlace → {targetHeading:F0}°</color>");
+    }
+
 
     public void SetLineGoal(Vector3 start, Vector3 end, bool finalGoal = false)
     {
@@ -319,6 +374,7 @@ public class SimpleTruckNav : MonoBehaviour
         useLineFollowing = true;
         useCurveFollowing = false;
         isFinalGoal = finalGoal;
+        curveAligning = false;
         hasGoal = true;
         
         // Visualize straight line
@@ -418,14 +474,36 @@ public class SimpleTruckNav : MonoBehaviour
         // Calculate start heading from current orientation
         float startHeading = transform.eulerAngles.y;
         
-        // Control points based on headings
-        float d = Vector3.Distance(p0, p3) / 2f;
-        
-        float phi = startHeading * Mathf.Deg2Rad;
-        float theta = endHeading * Mathf.Deg2Rad;
-        
-        p1 = p0 + d * new Vector3(Mathf.Sin(phi), 0, Mathf.Cos(phi));
-        p2 = p3 - d * new Vector3(Mathf.Sin(theta), 0, Mathf.Cos(theta));
+        float phi   = startHeading * Mathf.Deg2Rad;
+        float theta = endHeading   * Mathf.Deg2Rad;
+
+        Vector3 startFwd = new Vector3(Mathf.Sin(phi),   0, Mathf.Cos(phi));
+        Vector3 endFwd   = new Vector3(Mathf.Sin(theta), 0, Mathf.Cos(theta));
+
+        Vector3 chord    = p3 - p0; chord.y = 0;
+        float   chordLen = chord.magnitude;
+        Vector3 chordDir = chordLen > 0.01f ? chord.normalized : startFwd;
+
+        // alignFwd = 1 → heading matches chord direction (straight-ahead, no S risk)
+        // alignFwd ≈ 0 → mostly lateral move (high S risk with heading-only control points)
+        float alignFwd = Vector3.Dot(startFwd, chordDir);
+
+        // Shorten control arms when lateral — long arms amplify the S inflection.
+        // Full alignment → 40% of chord length; pure lateral → 25%.
+        float d = chordLen * Mathf.Lerp(0.25f, 0.40f, Mathf.Clamp01(alignFwd));
+
+        // Blend control-point directions toward the chord as the move becomes more lateral.
+        // This converts the S into a smooth C-arc.
+        float lateralBlend = Mathf.Clamp01(1f - Mathf.Abs(alignFwd));
+        float blendAmount  = lateralBlend * 0.65f;
+
+        Vector3 p1Dir = Vector3.Normalize(Vector3.Lerp(startFwd, chordDir, blendAmount));
+        Vector3 p2Dir = Vector3.Normalize(Vector3.Lerp(endFwd,   chordDir, blendAmount));
+
+        p1 = p0 + d * p1Dir;
+        p2 = p3 - d * p2Dir;
+
+        Debug.Log($"[CURVE GEN] chordLen={chordLen:F1}m, alignFwd={alignFwd:F2}, blend={blendAmount:F2}, d={d:F2}m");
         
         // Generate curve points
         curvePoints.Clear();
