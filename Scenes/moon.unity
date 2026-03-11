@@ -7432,9 +7432,9 @@ MonoBehaviour:
   useCurveFollowing: 0
   curveAlignmentTimeout: 5
   moveSpeed: 0.6
-  turnSpeed: 0.65
+  turnSpeed: 0.9
   stopDistance: 0.4
-  angleTolerance: 7
+  angleTolerance: 12
   minForwardCmd: 0.05
   minTurnCmd: 0.1
   controller: {fileID: 2113696334}
@@ -7591,6 +7591,7 @@ MonoBehaviour:
   curvedGoalTopicName: rover/curved_goal
   obstacleAvoidTopicName: rover/avoid_obstacle
   teleportTopicName: rover/teleport
+  rotateToHeadingTopicName: rover/rotate_to_heading
   testWaypoint: {x: 0, y: 0, z: 0}
   currentPlateIndex: -1
   isAtPlate: 0

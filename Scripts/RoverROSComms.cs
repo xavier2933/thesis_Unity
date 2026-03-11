@@ -185,33 +185,35 @@ public class RoverROSComms : MonoBehaviour
 
     private void OnWaypointReceived(RosMessageTypes.Geometry.PoseMsg msg)
     {
-        Vector3 targetPos = new Vector3((float)msg.position.x, (float)msg.position.y, (float)msg.position.z);
-        
-        // Convert ROS orientation to Unity
+        Vector3 targetPos = new Vector3(
+            (float)msg.position.x, (float)msg.position.y, (float)msg.position.z);
         Quaternion rosRotation = new Quaternion(
-            (float)msg.orientation.x,
-            (float)msg.orientation.y,
-            (float)msg.orientation.z,
-            (float)msg.orientation.w
-        );
-
-        // Check if orientation is provided (not just a default/empty quaternion)
-        // 0.1 degree tolerance is safe for floating point errors
+            (float)msg.orientation.x, (float)msg.orientation.y,
+            (float)msg.orientation.z, (float)msg.orientation.w);
         float? targetHeading = null;
         if (Quaternion.Angle(rosRotation, Quaternion.identity) > 0.1f)
-        {
             targetHeading = rosRotation.eulerAngles.y;
-        }
-
-        if (sequenceManager != null)
+        if (targetHeading.HasValue)
         {
-            // Pass the optional heading to the manager
-            sequenceManager.GoToPosition(targetPos, targetHeading);
-            
-            string mode = targetHeading.HasValue ? $"Curve to {targetHeading}°" : "Straight Line";
-            Debug.Log($"<color=cyan>[ROS] Waypoint received ({mode}): {targetPos}</color>");
+            // Explicit heading: let sequenceManager handle it
+            if (sequenceManager != null)
+                sequenceManager.GoToPosition(targetPos, targetHeading);
+            Debug.Log($"<color=cyan>[ROS] Waypoint (heading={targetHeading.Value:F0}°): {targetPos}</color>");
+        }
+        else
+        {
+            // No heading: use SetLineGoal directly — heading derived from travel direction
+            // Do NOT route through sequenceManager which defaults to heading=0°
+            if (truckNav != null)
+            {
+                truckNav.SetLineGoal(truckNav.transform.position, targetPos);
+                isNavigating = true;
+                Debug.Log($"<color=cyan>[ROS] Waypoint (straight line): {targetPos}</color>");
+            }
         }
     }
+
+
     void Update()
     {
         // Detect when curved navigation completes

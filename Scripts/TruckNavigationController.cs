@@ -175,6 +175,11 @@ public class SimpleTruckNav : MonoBehaviour
                 turnCmd = ApplyDeadband(Mathf.Clamp(finalHeadingError / 30f, -1f, 1f) * turnSpeed, minTurnCmd);
             }
 
+            // Creep forward while still meaningfully far from endpoint so the rover 
+            // doesn't stall on inertia during heading alignment. Stop creeping at 0.1m.
+            if (distanceToEnd > 0.1f)
+                forwardCmd = ApplyDeadband(moveSpeed * 0.3f, minForwardCmd);
+
             if (Time.frameCount % 30 == 0)
                 Debug.Log($"[LINE P2] DistToEnd: {distanceToEnd:F2}m, FinalHeadingErr: {finalHeadingError:F1}°");
             return;
@@ -304,7 +309,9 @@ public class SimpleTruckNav : MonoBehaviour
             Debug.Log($"<color=white>Curve reached end — aligning heading (final={isFinalGoal})</color>");
             curveAligning = true;
             curveAlignStartTime = Time.time;
-            StopRobot();
+            // Zero motors WITHOUT calling StopRobot() — that would immediately clear
+            // curveAligning and hasGoal, killing Phase 2 before it can run even one frame.
+            if (controller != null) { controller.rosForward = 0f; controller.rosTurn = 0f; }
             return;
         }
 
